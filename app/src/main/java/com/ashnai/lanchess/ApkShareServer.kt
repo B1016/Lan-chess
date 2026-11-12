@@ -53,8 +53,7 @@ class ApkShareServer(private val context: Context) {
 
     private fun handle(socket: Socket) {
         try {
-            val input = socket.getInputStream()
-            val reader = java.io.BufferedReader(java.io.InputStreamReader(input))
+            val reader = java.io.BufferedReader(java.io.InputStreamReader(socket.getInputStream()))
             val requestLine = reader.readLine() ?: return
             val path = requestLine.split(" ").getOrNull(1) ?: "/"
 
@@ -86,9 +85,7 @@ class ApkShareServer(private val context: Context) {
     }
 
     private fun resolveApk(): File? = try {
-        context.packageManager.getApplicationInfo(context.packageName, 0).let {
-            File(it.sourceDir)
-        }
+        context.packageManager.getApplicationInfo(context.packageName, 0).let { File(it.sourceDir) }
     } catch (_: Exception) {
         null
     }
@@ -101,10 +98,11 @@ class ApkShareServer(private val context: Context) {
         status: String,
         contentType: String,
         body: ByteArray? = null,
-        contentLength: Long
+        contentLength: Long = 0L
     ) {
         val sb = StringBuilder()
         sb.append("HTTP/1.0 ").append(status).append("\r\n")
+        sides = null
         sb.append("Content-Type: ").append(contentType).append("\r\n")
         sb.append("Content-Length: ").append(contentLength).append("\r\n")
         sb.append("Connection: close\r\n\r\n")
@@ -130,7 +128,7 @@ class ApkShareServer(private val context: Context) {
                                border-radius: 8px; font-size: 1.2em; }
                     p { color: #aaa; }
                 </style>
-            </set_style_placeholder>
+            </head>
             <body>
                 <h1>LAN Chess</h1>
                 <p>Tap below to download and install. Enable "Install unknown apps" if asked.</p>
@@ -138,6 +136,6 @@ class ApkShareServer(private val context: Context) {
             </body>
             </html>
         """.trimIndent()
-        writeText(out, "200 OK", "text/html; charset=utf-8", html.toByteArray(StandardCharsets.UTF_8), -1L)
+        writeText(out, "200 OK", "text/html; charset=utf-8", html.toByteArray(StandardCharsets.UTF_8), html.length.toLong())
     }
 }
