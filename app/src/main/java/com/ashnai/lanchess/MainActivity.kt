@@ -24,8 +24,6 @@ class MainActivity : AppCompatActivity() {
     private var boardView: BoardView? = null
     private var statusText: TextView? = null
     private var gameStarted = AtomicBoolean(false)
-    private var lastFrom: Int? = null
-    private var lastTo: Int? = null
     private val appliedMoves = HashSet<String>()
 
     private enum class Role { NONE, HOST, GUEST }
@@ -135,8 +133,6 @@ class MainActivity : AppCompatActivity() {
         state = ChessEngine.initialPosition()
         gameStarted.set(true)
         appliedMoves.clear()
-        lastFrom = null
-        lastTo = null
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -150,7 +146,7 @@ class MainActivity : AppCompatActivity() {
 
         root.addView(statusText)
         root.addView(boardView)
-        root.addView(button("Restart Game") { restartGame() })
+        root.addView(button("Restart Game") { confirmRestart() })
         root.addView(button("Back to Menu") { backToMenu() })
         setContentView(root)
         refreshStatus()
@@ -158,24 +154,26 @@ class MainActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------
     // Move handling
-    // // ------------------------------------------------------------------
+    // ------------------------------------------------------------------
 
     private fun handleTap(from: Int?, to: Int) {
         if (state.turn != playerColor) {
-            Toast.makeText(this, "Not your turn", to = Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Not your turn", Toast.LENGTH_SHORT).show()
             return
         }
         val legal = ChessEngine.legalMoves(state, playerColor)
         val move = legal.firstOrNull { it.first == from && it.second == to }
         if (from != null && move != null) {
-            val promo = if (isPromotion(from, to)) pickPromotion(move) else move.third
-            if (promo == null) return
-            applyLocalMove(from, to, promo)
+            if (isPromotion(from, to)) {
+                pickPromotion(from, to)
+            } else {
+                applyLocalMove(from, to, move.third)
+            }
         } else {
             val moves = legal.filter { it.first == to }
             if (moves.isNotEmpty()) {
                 boardView?.showSelection(to, moves.map { it.second }.distinct())
-            } {
+            } else {
                 boardView?.clearSelection()
             }
         }
@@ -186,23 +184,14 @@ class MainActivity : AppCompatActivity() {
         return BoardUtils.pieceType(piece) == ChessEngine.PAWN && (to / 8 == 0 || to / 8 == 7)
     }
 
-    private fun pickPromotion(move: Triple<Int, Int, Int>): Int? {
-        val options = listOf(
-            "Queen" to ChessEngine.QUEEN,
-            "Rook" to ChessEngine.ROOK,
-            "Bishop" to ChessEngine.BISHOP,
-            "Knight" to ChessEngine.KNIGHT
-        )
-        var picked: Int? = null
-        val dialog = AlertDialog.Builder(this)
+    private fun pickPromotion(from: Int, to: Int) {
+        val options = arrayOf("Queen", "Rook", "Bishop", "Knight")
+        val promos = intArrayOf(ChessEngine.QUEEN, ChessEngine.ROOK, ChessEngine.BISHOP, ChessEngine.KNIGHT)
+        AlertDialog.Builder(this)
             .setTitle("Promote pawn to:")
-            .setItems(options.map { it.first }.toTypedArray()) { _, which ->
-                picked = options[which].second
-                applyLocalMove(move.first, move.second, options[which].second)
-            }
+            .setItems(options) { _, which -> applyLocalMove(from, to, promos[which]) }
             .setOnCancelListener { boardView?.clearSelection() }
             .show()
-        return null // never used; move applied inside dialog callback
     }
 
     private fun applyLocalMove(from: Int, to: Int, promo: Int) {
@@ -220,6 +209,13 @@ class MainActivity : AppCompatActivity() {
     private fun handleRemoteMove(text: String) {
         runOnUiThread {
             if (!gameStarted.get()) return@runOnUiThread
+            if (text.equals("reset", ignoreCase = true)) {
+                state = ChessEngine.initialPosition()
+                appliedMoves.clear()
+                boardView?.updateState(state, null, null, null)
+                refreshStatus()
+                return@runOnUiThread
+            }
             val parsed = ChessEngine.textToMove(text) ?: return@runOnUiThread
             val (from, to, promo) = parsed
             val legal = ChessEngine.legalMoves(state, 1 - playerColor)
@@ -245,10 +241,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun setState(next: ChessEngine.GameState, from: Int, to: Int) {
         state = next
-        lastFrom = from
-        lastTo = to
         val checkSq = if (ChessEngine.isInCheck(state, state.turn)) {
-            (0..63).firstOrNull { state.board[it] == ChessEngine.KING or (if (state.turn == ChessEngine.WHITE) 0 else ChessEngine.BLACK_FLAG) }
+            val kingPiece = ChessEngine.KING or (if (state.turn == ChessEngine.WHITE) 0 else ChessEngine.BLACK_FLAG)
+            (0..63).firstOrNull { state.board[it] == kingPiece }
         } else null
         boardView?.updateState(state, from, to, checkSq)
     }
@@ -257,8 +252,7 @@ class MainActivity : AppCompatActivity() {
         val status = ChessEngine.status(state)
         val turnText = when (state.turn) {
             ChessEngine.WHITE -> "White to move"
-            ChessEngine.BLACK -> "Black to move"
-            else -> ""
+            else -> "Black to move"
         }
         statusText?.text = when (status) {
             ChessEngine.Status.CHECK -> "Check! $turnText"
@@ -271,17 +265,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun restartGame() {
-        val msg = "Restart game?" + when (role) {
-            Role.HOST, Role.GUEST -> " Both devices reset to a new game."
-            Role.NONE -> ""
-        }
+    private fun confirmRestart() {
         AlertDialog.Builder(this)
             .setTitle("Restart")
-            .setMessage(msg)
+            .setMessage("Restart the game on both devices?")
             .setPositiveButton("Restart") { _, _ ->
                 sendControl("reset")
-                showGame()
+                state = ChessEngine.initialPosition()
+                appliedMoves.clear()
+                boardView?.updateState(state, null, null, null)
+                refreshStatus()
             }
             .setNegativeButton("Cancel", null)
             .show()
