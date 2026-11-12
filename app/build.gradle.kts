@@ -1,5 +1,3 @@
-import java.net.NetworkInterface
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -35,10 +33,6 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
-
-    buildFeatures {
-        viewBinding = true
-    }
 }
 
 dependencies {
@@ -47,14 +41,3 @@ dependencies {
     implementation(libs.material)
     implementation(libs.constraintlayout)
 }
-
-/**
- * Resolves the first non-loopback IPv4 address of this machine.
- * Kept here so the same helper can be reused by tooling later.
- */
-fun resolveLocalIpv4(): String? =
-    NetworkInterface.getNetworkInterfaces().toList()
-        .filter { it.isUp && !it.isLoopback }
-        .flatMap { it.inetAddresses.toList() }
-        .map { it.hostAddress ?: "" }
-        .firstOrNull { it.length <= 15 && it.count { c -> c == '.' } == 3 && it[0].isDigit() }
