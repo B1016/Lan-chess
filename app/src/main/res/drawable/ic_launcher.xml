@@ -1,0 +1,20 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#B58863"
+        android:pathData="M0,0h108v108h-108z" />
+    <path
+        android:fillColor="#F0D9B5"
+        android:pathData="M0,0h13.5v13.5h-13.5z M27,0h13.5v13.5h-13.5z M54,0h13.5v13.5h-13.5z M81,0h13.5v13.5h-13.5z M13.5,13.5h13.5v13.5h-13.5z M40.5,13.5h13.5v13.5h-13.5z M67.5,13.5h13.5v13.5h-13.5z M94.5,13.5h13.5v13.5h-13.5z M0,27h13.5v13.5h-13.5z M27,27h13.5v13.5h-13.5z M54,27h13.5v13.5h-13.5z M81,27h13.5v13.5h-13.5z M13.5,40.5h13.5v13.5h-13.5z M40.5,40.5h13.5v13.5h-13.5z M67.5,40.5h13.5v13.5h-13.5z M94.5,40.5h13.5v13.5h-13.5z M0,54h13.5v13.5h-13.5z M27,54h13.5v13.5h-13.5z M54,54h13.5v13.5h-13.5z M81,54h13.5v13.5h-13.5z M13.5,67.5h13.5v13.5h-13.5z M40.5,67.5h13.5v13.5h-13.5z M67.5,67.5h13.5v13.5h-13.5z M94.5,67.5h13.5v13.5h-13.5z M0,81h13.5v13.5h-13.5z M27,81h13.5v13.5h-13.5z M54,81h13.5v13.5h-13.5z M81,81h13.5v13.5h-13.5z M13.5,94.5h13.5v13.5h-13.5z M40.5,94.5h13.5v13.5h-13.5z M67.5,94.5h13.5v13.5h-13.5z M94.5,94.5h13.5v13.5h-13.5z" />
+    <path
+        android:fillColor="#333333"
+        android:pathData="M54,30c9,0 14,6 14,14c0,5 -2,10 -7,12c8,2 12,8 12,15h-38c0,-7 4,-13 12,-15c-5,-2 -7,-7 -7,-12c0,-8 5,-14 14,-14z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#333333"
+        android:strokeWidth="3"
+        android:pathData="M40,82h28" />
+</vector>
