@@ -10,14 +10,14 @@ import android.view.View
 import kotlin.math.min
 
 /**
- * Custom-drawn 8x8 chessboard with drag-free tap-to-move interaction:
+ * Custom-drawn 8x8 chessboard with tap-to-move interaction:
  * tap a piece, then tap the destination square. The view is purely
  * presentational; legality is decided by MainActivity via the engine.
  */
 class BoardView(
     context: Context,
     private var state: ChessEngine.GameState,
-    private val playerColor: Int,
+    private var playerColor: Int,
     private val onTap: (from: Int?, to: Int) -> Unit
 ) : View(context) {
 
@@ -27,7 +27,6 @@ class BoardView(
     private val hintPaint = Paint().apply { color = Color.parseColor("#60A00000") }
     private val piecePaint = Paint().apply {
         isAntiAlias = true
-        textSize = 0f
         textAlign = Paint.Align.CENTER
     }
     private val lastMovePaint = Paint().apply { color = Color.parseColor("#50FFD700") }
@@ -43,7 +42,7 @@ class BoardView(
         state = newState
         selected = null
         legalTargets = emptyList()
-        lastMove = if (lastFrom != null && lastTo != null) Pair(lastFrom, lastTo) else lastMove
+        if (lastFrom != null && lastTo != null) lastMove = Pair(lastFrom, lastTo)
         checkSquare = checkSq
         invalidate()
     }
@@ -62,9 +61,9 @@ class BoardView(
 
     fun setPlayerColor(color: Int) {
         playerColor = color
+        invalidate()
     }
 
-    @SuppressLint("DrawPreview")
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         cellSize = min(w, h) / 8f
@@ -72,37 +71,35 @@ class BoardView(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val square = { i: Int -> squareToXY(i) }
 
         // Board squares.
         for (i in 0..63) {
-            val (x, y) = square(i)
+            val (x, y) = squareToXY(i)
             canvas.drawRect(x, y, x + cellSize, y + cellSize, if (BoardUtils.isDarkSquare(i)) darkPaint else lightPaint)
         }
 
         // Last-move highlight.
         lastMove?.let { (f, t) ->
             listOf(f, t).forEach { i ->
-                val (x, y) = square(i)
+                val (x, y) = squareToXY(i)
                 canvas.drawRect(x, y, x + cellSize, y + cellSize, lastMovePaint)
             }
         }
 
         // Check highlight.
         checkSquare?.let { i ->
-            val (x, y) = square(i)
-            canvas.drawRect(x, y, x + cellSize, y + cellSize, checkPaint)
+            val (x, y) = squareToXY(i)
             canvas.drawRect(x, y, x + cellSize, y + cellSize, checkPaint)
         }
 
         // Selected square and legal-target hints.
         selected?.let { s ->
-            val (x, y) = square(s)
+            val (x, y) = squareToXY(s)
             canvas.drawRect(x, y, x + cellSize, y + cellSize, selPaint)
         }
         for (t in legalTargets) {
-            val (x, y) = square(t)
-            canvas.drawCircle(x + cellSize / 2, y + cellStatus / 2, cellSize / 5f, hintPaint)
+            val (x, y) = squareToXY(t)
+            canvas.drawCircle(x + cellSize / 2, y + cellSize / 2, cellSize / 5f, hintPaint)
         }
 
         // Pieces.
@@ -110,7 +107,7 @@ class BoardView(
         for (i in 0..63) {
             val p = state.board[i]
             if (p == ChessEngine.EMPTY) continue
-            val (x, y) = square(i)
+            val (x, y) = squareToXY(i)
             val glyph = BoardUtils.pieceGlyph(p)
             piecePaint.color = if (BoardUtils.pieceColor(p) == ChessEngine.WHITE) Color.WHITE else Color.BLACK
             piecePaint.setShadowLayer(3f, 1f, 1f, Color.GRAY)
@@ -120,6 +117,7 @@ class BoardView(
         }
     }
 
+    /** Flips the board for the black player so their pieces start at the bottom. */
     private fun squareToXY(i: Int): Pair<Float, Float> {
         val flipped = playerColor == ChessEngine.BLACK
         val rank = i / 8
@@ -138,8 +136,7 @@ class BoardView(
         if (col !in 0..7 || row !in 0..7) return true
         val file = if (flipped) 7 - col else col
         val rank = if (flipped) 7 - row else row
-        val sq = rank * 8 + file
-        onTap(selected, sq)
+        onTap(selected, rank * 8 + file)
         return true
     }
 }
