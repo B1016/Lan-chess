@@ -3,8 +3,6 @@
     <style name="Theme.LanChess" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="colorPrimary">@color/chessboard_dark</item>
         <item name="colorPrimaryVariant">@color/chessboard_dark</item>
-<item name="colorPrimary">@color/chessboard_dark</item>
-        <item name="colorPrimaryVariant">@color/chessboard_dark</item>
         <item name="colorOnPrimary">#FFFFFF</item>
     </style>
 </resources>
