@@ -3,20 +3,17 @@ package com.ashnai.lanchess
 import android.annotation.SuppressLint
 import android.os.Bundle
 import android.text.InputType
-import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import java.util.HashSet
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * Single-activity app. Shows the LAN Chess menu, then swaps in the game
- * screen (board + status bar) for host or guest play.
- */
 class MainActivity : AppCompatActivity() {
 
     private var state = ChessEngine.initialPosition()
@@ -27,7 +24,9 @@ class MainActivity : AppCompatActivity() {
     private var boardView: BoardView? = null
     private var statusText: TextView? = null
     private var gameStarted = AtomicBoolean(false)
-    private val appliedMoves = java.util.HashSet<String>()
+    private var lastFrom: Int? = null
+    private var lastTo: Int? = null
+    private val appliedMoves = HashSet<String>()
 
     private enum class Role { NONE, HOST, GUEST }
 
@@ -36,49 +35,59 @@ class MainActivity : AppCompatActivity() {
         showMenu()
     }
 
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    // ------------------------------------------------------------------
+    // Menu
+    // ------------------------------------------------------------------
+
     private fun showMenu() {
-        val dp = { v: Int -> (v * resources.displayMetrics.density).toInt() }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(32), dp(64), dp(32), dp(32))
             gravity = android.view.Gravity.CENTER_HORIZONTAL
         }
-        val title = TextView(this).apply {
+        root.addView(TextView(this).apply {
             text = "LAN Chess"
             textSize = 32f
             setTextColor(0xFF333333.toInt())
             gravity = android.view.Gravity.CENTER
-        }
-        val subtitle = TextView(this).apply {
+        })
+        root.addView(TextView(this).apply {
             text = "Play chess with anyone on your local network"
             textSize = 14f
             setTextColor(0xFF666666.toInt())
             gravity = android.view.Gravity.CENTER
             setPadding(0, dp(8), 0, dp(40))
-        }
-        fun makeButton(label: String, onClick: () -> Unit): Button =
-            Button(this).apply {
-                text = label
-                setOnClickListener { onClick() }
-            }
-
-        root.addView(title)
-        root.addView(subtitle)
-        root.addView(makeButton("Host Game") { startHost() })
-        root.addView(makeButton("Join Game") { promptJoinIp() })
-        root.addView(makeButton("Share App") { startActivity(android.content.Intent(this, ShareActivity::class.java)) })
+        })
+        root.addView(button("Host Game") { startHost() })
+        root.addView(button("Join Game") { promptJoinIp() })
+        root.addView(button("Share App") {
+            startActivity(android.content.Intent(this@MainActivity, ShareActivity::class.java))
+        })
         setContentView(root)
     }
+
+    private fun button(label: String, onClick: () -> Unit): Button =
+        Button(this).apply {
+            text = label
+            setOnClickListener { onClick() }
+        }
+
+    // ------------------------------------------------------------------
+    // Host / Guest
+    // ------------------------------------------------------------------
 
     private fun startHost() {
         role = Role.HOST
         playerColor = ChessEngine.WHITE
-        server = ChessServer(onMove = { handleRemoteMove(it) })
+        val s = ChessServer(onMove = { handleRemoteMove(it) })
         try {
-            val ip = server?.start(port = 5000) ?: run {
-                Toast.makeText(this, "Could not start server", Toast.LENGTH_SHORT).show()
+            val ip = s.start(port = 5000) ?: run {
+                Toast.makeText(this, "Not on Wi-Fi or hotspot — no LAN IP", Toast.LENGTH_LONG).show()
                 return
             }
+            server = s
             Toast.makeText(this, "Hosting. Your IP: $ip", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             Toast.makeText(this, "Server error: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -94,7 +103,7 @@ class MainActivity : AppCompatActivity() {
             setSingleLine()
         }
         val wrap = FrameLayout(this).apply { setPadding(dp(32), 0, dp(32), 0); addView(input) }
-        androidx.appcompat.app.AlertDialog.Builder(this)
+        AlertDialog.Builder(this)
             .setTitle("Join Game")
             .setMessage("Enter the host's IP address shown on their screen.")
             .setView(wrap)
@@ -106,17 +115,12 @@ class MainActivity : AppCompatActivity() {
     private fun startGuest(ip: String) {
         if (ip.isBlank()) return
         role = Role.GUEST
-        playerColor = ChessEngine.BLACK
         client = ChessClient(
             host = ip,
             port = 5000,
             onMove = { handleRemoteMove(it) },
-            onConnected = {
-                runOnUiThread { Toast.makeText(this, "Connected!", Toast.LENGTH_SHORT).show() }
-            },
-            onDisconnected = {
-                runOnUiThread { statusText?.text = "Opponent disconnected" }
-            }
+            onConnected = { runOnUiThread { Toast.makeText(this, "Connected!", Toast.LENGTH_SHORT).show() } },
+            onDisconnected = { runOnUiThread { statusText?.text = "Opponent disconnected" } }
         )
         client?.connect()
         showGame()
@@ -131,8 +135,9 @@ class MainActivity : AppCompatActivity() {
         state = ChessEngine.initialPosition()
         gameStarted.set(true)
         appliedMoves.clear()
+        lastFrom = null
+        lastTo = null
 
-        val dp = { v: Int -> (v * resources.displayMetrics.density).toInt() }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(8), dp(24), dp(8), dp(8))
@@ -145,76 +150,164 @@ class MainActivity : AppCompatActivity() {
 
         root.addView(statusText)
         root.addView(boardView)
-        root.addView(Button(this).apply {
-            text = "Restart Game"
-            setOnClickListener { restartGame() }
-        })
-        root.addView(Button(this).apply {
-            text = "Back to Menu"
-            setOnClickListener { backToMenu() }
-        })
+        root.addView(button("Restart Game") { restartGame() })
+        root.addView(button("Back to Menu") { backToMenu() })
         setContentView(root)
         refreshStatus()
     }
 
+    // ------------------------------------------------------------------
+    // Move handling
+    // // ------------------------------------------------------------------
+
     private fun handleTap(from: Int?, to: Int) {
         if (state.turn != playerColor) {
-            Toast.makeText(this, "Not your turn", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Not your turn", to = Toast.LENGTH_SHORT).show()
             return
         }
         val legal = ChessEngine.legalMoves(state, playerColor)
-        if (from != null && legal.any { it.first == from && it.second == to }) {
-            val promo = if (needsPromotion(from, to)) ChessEngine.QUEEN else {
-                legal.first { it.first == from && it.second == to }.third
-            }
+        val move = legal.firstOrNull { it.first == from && it.second == to }
+        if (from != null && move != null) {
+            val promo = if (isPromotion(from, to)) pickPromotion(move) else move.third
+            if (promo == null) return
             applyLocalMove(from, to, promo)
         } else {
-            // Select a new piece (or re-select).
             val moves = legal.filter { it.first == to }
             if (moves.isNotEmpty()) {
                 boardView?.showSelection(to, moves.map { it.second }.distinct())
-            } else {
+            } {
                 boardView?.clearSelection()
             }
         }
     }
 
-    private fun needsPromotion(from: Int, to: Int): Boolean {
+    private fun isPromotion(from: Int, to: Int): Boolean {
         val piece = state.board[from]
-        return ChessEngine.textToMove("") == null && BoardUtils.pieceType(piece) == ChessEngine.PAWN &&
-            (to / 8 == 0 || to / 8 == 7)
+        return BoardUtils.pieceType(piece) == ChessEngine.PAWN && (to / 8 == 0 || to / 8 == 7)
+    }
+
+    private fun pickPromotion(move: Triple<Int, Int, Int>): Int? {
+        val options = listOf(
+            "Queen" to ChessEngine.QUEEN,
+            "Rook" to ChessEngine.ROOK,
+            "Bishop" to ChessEngine.BISHOP,
+            "Knight" to ChessEngine.KNIGHT
+        )
+        var picked: Int? = null
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Promote pawn to:")
+            .setItems(options.map { it.first }.toTypedArray()) { _, which ->
+                picked = options[which].second
+                applyLocalMove(move.first, move.second, options[which].second)
+            }
+            .setOnCancelListener { boardView?.clearSelection() }
+            .show()
+        return null // never used; move applied inside dialog callback
     }
 
     private fun applyLocalMove(from: Int, to: Int, promo: Int) {
         val text = ChessEngine.moveToText(from, to, promo)
         if (!appliedMoves.add(text)) return
-        val next = ChessEngine.applyMove(state, from, to, promo)
-        setState(next, from, to)
+        setState(ChessEngine.applyMove(state, from, to, promo), from, to)
         when (role) {
             Role.HOST -> server?.send(text)
             Role.GUEST -> client?.send(text)
-            else -> {}
+            Role.NONE -> {}
         }
         refreshStatus()
     }
 
     private fun handleRemoteMove(text: String) {
-        if (!gameStarted.get()) return
-        val parsed = ChessEngine.textToMove(text) ?: return
-        val (from, to, promo) = parsed
-        // Verify legality to stay in sync and resist nonsense input.
-        if (!ChessEngine.legalMoves(state, 1 - playerColor).any { it.first == from && it.second == to && it.third == promo }) {
-            if (promo == ChessEngine.EMPTY && ChessEngine.legalMoves(state, 1 - playerColor)
-                    .any { it.first == from && it.second == to }
-            ) {
-                setState(ChessEngine.applyMove(state, from, to, promo), from, to)
-                refreshStatus()
-                return
+        runOnUiThread {
+            if (!gameStarted.get()) return@runOnUiThread
+            val parsed = ChessEngine.textToMove(text) ?: return@runOnUiThread
+            val (from, to, promo) = parsed
+            val legal = ChessEngine.legalMoves(state, 1 - playerColor)
+            val exact = legal.firstOrNull { it.first == from && it.second == to && it.third == promo }
+            val loose = if (exact == null && promo == ChessEngine.EMPTY) {
+                legal.firstOrNull { it.first == from && it.second == to }
+            } else null
+            when {
+                exact != null -> setState(ChessEngine.applyMove(state, from, to, promo), from, to)
+                loose != null -> setState(ChessEngine.applyMove(state, from, to, loose.third), from, to)
+                else -> {
+                    statusText?.text = "Invalid move received"
+                    return@runOnUiThread
+                }
             }
-            runOnUiThread { statusText?.text = "Invalid move received" }
-            return
+            refreshStatus()
         }
-        setState(ChessEngine.applyMove(state, from, to, promo), from, to)
-        refreshStatus()
+    }
+
+    // ------------------------------------------------------------------
+    // State / UI refresh
+    // ------------------------------------------------------------------
+
+    private fun setState(next: ChessEngine.GameState, from: Int, to: Int) {
+        state = next
+        lastFrom = from
+        lastTo = to
+        val checkSq = if (ChessEngine.isInCheck(state, state.turn)) {
+            (0..63).firstOrNull { state.board[it] == ChessEngine.KING or (if (state.turn == ChessEngine.WHITE) 0 else ChessEngine.BLACK_FLAG) }
+        } else null
+        boardView?.updateState(state, from, to, checkSq)
+    }
+
+    private fun refreshStatus() {
+        val status = ChessEngine.status(state)
+        val turnText = when (state.turn) {
+            ChessEngine.WHITE -> "White to move"
+            ChessEngine.BLACK -> "Black to move"
+            else -> ""
+        }
+        statusText?.text = when (status) {
+            ChessEngine.Status.CHECK -> "Check! $turnText"
+            ChessEngine.Status.CHECKMATE ->
+                if (state.turn == ChessEngine.WHITE) "Checkmate — Black wins" else "Checkmate — White wins"
+            ChessEngine.Status.STALEMATE -> "Stalemate — draw"
+            ChessEngine.Status.DRAW_HALFMOVE -> "Draw by 50-move rule"
+            ChessEngine.Status.DRAW_INSUFFICIENT -> "Draw — insufficient material"
+            ChessEngine.Status.ACTIVE -> turnText
+        }
+    }
+
+    private fun restartGame() {
+        val msg = "Restart game?" + when (role) {
+            Role.HOST, Role.GUEST -> " Both devices reset to a new game."
+            Role.NONE -> ""
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Restart")
+            .setMessage(msg)
+            .setPositiveButton("Restart") { _, _ ->
+                sendControl("reset")
+                showGame()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun sendControl(message: String) {
+        when (role) {
+            Role.HOST -> server?.send(message)
+            Role.GUEST -> client?.send(message)
+            Role.NONE -> {}
+        }
+    }
+
+    private fun backToMenu() {
+        server?.stop()
+        client?.disconnect()
+        server = null
+        client = null
+        role = Role.NONE
+        gameStarted.set(false)
+        showMenu()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        server?.stop()
+        client?.disconnect()
     }
 }
