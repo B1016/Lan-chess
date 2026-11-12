@@ -102,7 +102,6 @@ class ApkShareServer(private val context: Context) {
     ) {
         val sb = StringBuilder()
         sb.append("HTTP/1.0 ").append(status).append("\r\n")
-        sides = null
         sb.append("Content-Type: ").append(contentType).append("\r\n")
         sb.append("Content-Length: ").append(contentLength).append("\r\n")
         sb.append("Connection: close\r\n\r\n")
