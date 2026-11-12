@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LAN Chess</string>
+    <string name="host_game">Host Game</string>
+    <string name="join_game">Join Game</string>
+    <string name="share_app">Share App</string>
+    <string name="board_label">Board</string>
+    <string name="restart_game">Restart Game</string>
+</resources>
