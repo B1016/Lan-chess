@@ -1,16 +1,15 @@
 package com.lanchess.app.net
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import com.lanchess.app.core.ChessCore
 import com.lanchess.app.core.ChessCore.GameState
 import com.lanchess.app.core.ChessCore.Move
 import org.json.JSONObject
+import java.io.BufferedReader
 import java.io.File
-import java.io.FileOutputStream
+import java.io.InputStreamReader
+import java.net.DatagramSocket
 import java.net.InetAddress
-import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import kotlin.concurrent.thread
@@ -37,50 +36,48 @@ class LanChessHost(
         const val GAME_PORT = 50505
         const val HTTP_PORT = 8080
         const val APK_FILE_NAME = "LanChess.apk"
-        private const val TAG = "LanChessHost"
     }
 
-    private var serverSocket: ServerSocket? = null
+    private var gameServerSocket: ServerSocket? = null
+    private var httpServerSocket: ServerSocket? = null
     private var clientSocket: Socket? = null
     private val lock = Any()
 
-    private var running = false
+    @Volatile private var running = false
     private var acceptThread: Thread? = null
     private var httpThread: Thread? = null
 
     fun start() {
         if (running) return
         running = true
+
+        // Game server (TCP)
         acceptThread = thread(name = "lan-chess-host") {
             try {
-                serverSocket = ServerSocket(GAME_PORT)
-                notifyError("Game server listening on port $GAME_PORT")
+                val server = ServerSocket(GAME_PORT)
+                synchronized(lock) { gameServerSocket = server }
                 while (running) {
-                    val client = serverSocket?.accept() ?: return@thread
-                    synchronized(lock) {
-                        clientSocket = client
-                    }
+                    val client = server.accept() ?: return@thread
+                    synchronized(lock) { clientSocket = client }
                     listener.onOpponentJoined()
                     handleClient(client)
                 }
             } catch (e: Exception) {
-                if (running) listener.onError("Host stopped: ${e.message}")
+                if (running) listener.onError("Game server stopped: ${e.message}")
             }
         }
+
+        // Sharing server (HTTP)
         startHttpServer()
     }
 
     private fun handleClient(client: Socket) {
         thread(name = "lan-chess-client-io") {
             try {
-                val input = client.getInputStream()
-                val output = client.getOutputStream()
-                val buffer = ByteArray(4096)
+                val input = BufferedReader(InputStreamReader(client.getInputStream(), Charsets.UTF_8))
                 while (running) {
-                    val n = input.read(buffer)
-                    if (n < 0) break
-                    val text = String(buffer, 0, n, Charsets.UTF_8).trim()
-                    if (text.isEmpty()) continue
+                    val text = input.readLine() ?: break
+                    if (text.isBlank()) continue
                     val json = try {
                         JSONObject(text)
                     } catch (e: Exception) {
@@ -90,10 +87,13 @@ class LanChessHost(
                 }
                 listener.onClientDisconnected()
             } catch (e: Exception) {
-                if (runn) listener.onError("Client error: ${e.message}")
+                if (running) listener.onError("Client error: ${e.message}")
                 listener.onClientDisconnected()
             } finally {
-                synchronized(lock) { clientSocket?.closeQuietly(); clientSocket = null }
+                synchronized(lock) {
+                    clientSocket?.closeQuietly()
+                    clientSocket = null
+                }
             }
         }
     }
@@ -105,7 +105,7 @@ class LanChessHost(
                 if (move != null) listener.onMoveReceived(move)
             }
             "state" -> listener.onStateMessage(json.optJSONObject("state") ?: JSONObject())
-            else -> listener.onError("Unknown message: ${json.optString("type")}")
+            else -> listener.onError("Unknown message type: ${json.optString("type")}")
         }
     }
 
@@ -121,22 +121,8 @@ class LanChessHost(
                 castleRookFrom = json.optInt("castleRookFrom", -1),
                 castleRookTo = json.optInt("castleRookTo", -1)
             )
-        } (catch e: Exception) {
-            null
-        }
-    }
-
-    private fun sendMessage(json: JSONObject): Boolean {
-        val client = synchronized(lock) { clientSocket } ?: return false
-        return try {
-            val out = client.getOutputStream()
-            val bytes = (json.toString() + "\n").toByteArray(Charsets.UTF_8)
-            out.write(bytes)
-            out.flush()
-            true
         } catch (e: Exception) {
-            listener.onError("Send failed: ${e.message}")
-            false
+            null
         }
     }
 
@@ -146,14 +132,34 @@ class LanChessHost(
         val json = JSONObject()
         json.put("type", "move")
         json.put("from", move.from)
-        io.put("to", move.to)
+        json.put("to", move.to)
+        java_jsonPutMoveExtras(json, move)
+        return json
+    }
+
+    private fun java_jsonPutMoveExtras(json: JSONObject, move: Move) {
         json.put("promotion", move.promotion)
         json.put("isCapture", move.isCapture)
         json.put("isEnPassant", move.isEnPassant)
         json.put("isCastle", move.isCastle)
-        json.put("castleRookFrom", mmove.castleRookFrom)
+        json.put("castleRookFrom", move.castleRookFrom)
         json.put("castleRookTo", move.castleRookTo)
-        return json
+    }
+
+    private fun sendMessage(json: JSONObject): Boolean {
+        val client = synchronized(lock) { clientSocket } ?: return false
+        return try {
+            val out = client.getOutputStream()
+            val bytes = (json.toString() + "\n").toByteArray(Charsets.UTF_8)
+            synchronized(client) {
+                out.write(bytes)
+                out.flush()
+            }
+            true
+        } catch (e: Exception) {
+            listener.onError("Send failed: ${e.message}")
+            false
+    }
     }
 
     fun sendState(state: GameState): Boolean {
@@ -162,23 +168,28 @@ class LanChessHost(
         val json = JSONObject()
         json.put("type", "state")
         json.put("board", boardJson)
+        quickPutState(json, state)
+        return sendMessage(json)
+    }
+
+    private fun quickPutState(json: JSONObject, state: GameState) {
         json.put("turn", state.turn.name)
         json.put("result", state.result.name)
         json.put("castlingRights", state.castlingRights)
         json.put("enPassantSquare", state.enPassantSquare)
-        return sendMessage(json)
     }
 
+    /** The device's Wi-Fi LAN IP, or null if unavailable. */
     fun ipAddress(): String? {
         return try {
-            // Get the LAN (Wi-Fi) IP via a UDP trick: open a socket to a public address,
-            // which picks the route through the Wi-Fi interface without sending data.
-            val s = java.net.DatagramSocket()
+            // UDP trick: connect() to a public address without sending data,
+            // which binds the socket to the Wi-Fi interface's local address.
+            val s = DatagramSocket()
             s.connect(InetAddress.getByName("8.8.8.8"), 10000)
             val addr = s.localAddress.hostAddress
             s.close()
             addr
-        } (catch e: Exception) {
+        } catch (e: Exception) {
             null
         }
     }
@@ -188,10 +199,13 @@ class LanChessHost(
         synchronized(lock) {
             clientSocket?.closeQuietly()
             clientSocket = null
-            try { serverSocket?.close() } catch (_: Exception) {}
-            serverSocket = null
+            try { gameServerSocket?.close() } catch (_: Exception) {}
+            gameServerSocket = null
+            try { httpServerSocket?.close() } catch (_: Exception) {}
+            httpServerSocket = null
         }
-        httpThread?.let { it.interrupt(); it.join(500) }
+        try { acceptThread?.join(500) } catch (_: InterruptedException) {}
+        try { httpThread?.join(500) } catch (_: InterruptedException) {}
     }
 
     private fun Socket.closeQuietly() {
@@ -203,32 +217,30 @@ class LanChessHost(
     private fun startHttpServer() {
         httpThread = thread(name = "lan-chess-http") {
             try {
-                val httpServer = ServerSocket(HTTP_PORT)
+                val server = ServerSocket(HTTP_PORT)
+                synchronized(lock) { httpServerSocket = server }
                 while (running) {
-                    val socket = httpServer.accept()
-                    thread(name = "lan-chess-http-conn") { serveApk(socket, httpServer) }
+                    val socket = server.accept()
+                    thread(name = "lan-chess-http-conn") { serveApk(socket) }
                 }
-                httpServer.close()
+                server.close()
             } catch (e: Exception) {
                 if (running) listener.onError("HTTP server stopped: ${e.message}")
             }
         }
     }
 
-    private fun serveApk(socket: Socket, server: ServerSocket) {
+    private fun serveApk(socket: Socket) {
         try {
             val input = socket.getInputStream()
             val output = socket.getOutputStream()
 
-            // Read request headers until a blank line (end of HTTP headers).
-            val reader = java.io.BufferedReader(java.io.InputStreamReader(input))
+            // Read request headers until the blank line.
+            val reader = BufferedReader(InputStreamReader(input, Charsets.ISO_8859_1))
             val requestLine = reader.readLine() ?: return
-            val headers = HashMap<String, String>()
             while (true) {
                 val line = reader.readLine() ?: break
                 if (line.isEmpty()) break
-                val idx = line.indexOf(':')
-                if (idx > 0) headers[line.substring(0, idx).trim().lowercase()] = line.substring(idx + 1).trim()
             }
 
             val apkFile = locateApk()
@@ -243,15 +255,16 @@ class LanChessHost(
                 output.write(bytes)
                 output.flush()
             } else {
-                val body = "<html><body><h1>Lan Chess</h1><p>APK file not found on this device.</p>" +
-                    "<p>Build and install the release APK on the host device to enable sharing.</p>" +
-                    "<p>Port: $HTTP_PORT</p></body></html>"
+                val body = ("<html><body><h1>Lan Chess</h1>" +
+                    "<p>APK file not found on this device.</p>" +
+                    "<p>Install Lan Chess on this host device first to enable sharing.</p></body></html>")
+                    .toByteArray(Charsets.UTF_8)
                 val header = "HTTP/1.1 404 Not Found\r\n" +
                     "Content-Type: text/html; charset=utf-8\r\n" +
-                    "Content-Length: ${body.length}\r\n" +
+                    "Content-Length: ${body.size}\r\n" +
                     "Connection: close\r\n\r\n"
                 output.write(header.toByteArray(Charsets.ISO_8859_1))
-                alongside write(body.toByteArray(Charsets.UTF_8))
+                output.write(body)
                 output.flush()
             }
         } catch (e: Exception) {
@@ -261,12 +274,14 @@ class LanChessHost(
         }
     }
 
+    /**
+     * Locate the installed APK for this app. Once Lan Chess is installed on
+     * the host device, this path can be served to other devices for sharing.
+     */
     private fun locateApk(): File? {
         return try {
-            // The currently installed APK path as known by the package manager.
             val pm = context.packageManager
-            val pkg = context.packageName
-            val info = pm.getPackageInfo(pkg, 0)
+            val info = pm.getPackageInfo(context.packageName, 0)
             val apkPath = info.applicationInfo?.sourceDir
             if (apkPath != null) File(apkPath) else null
         } catch (e: Exception) {
