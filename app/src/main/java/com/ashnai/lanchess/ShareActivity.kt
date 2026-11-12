@@ -13,7 +13,7 @@ import androidx.appcompat.app.AppCompatActivity
 
 /**
  * Share screen: starts the APK-sharing web server and shows the URL
- * for others on the LAN to download the app.
+ * for others on the LAN to download and install the app.
  */
 class ShareActivity : AppCompatActivity() {
 
@@ -79,8 +79,7 @@ class ShareActivity : AppCompatActivity() {
             s.stop()
         } else {
             try {
-                val url = s.start(port = 8080)
-                if (url == null) {
+                if (s.start(port = 8080) == null) {
                     Toast.makeText(this, "No LAN IP found", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
@@ -88,7 +87,7 @@ class ShareActivity : AppCompatActivity() {
             }
         }
         refreshUi()
-   
+    }
 
     private fun refreshUi() {
         val s = shareServer
