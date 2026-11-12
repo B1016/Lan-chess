@@ -2,6 +2,4 @@
 <resources>
     <color name="chessboard_light">#F0D9B5</color>
     <color name="chessboard_dark">#B58863</color>
-    <color name="chessboard_light">#F0D9B5</color>
-    <color name="chessboard_dark">#B58863</color>
 </resources>
